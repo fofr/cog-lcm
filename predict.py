@@ -1,7 +1,6 @@
 import os
 import torch
-import datetime
-import tarfile
+import cv2
 from diffusers import DiffusionPipeline
 from pipeline import LatentConsistencyModelImg2ImgPipeline
 from cog import BasePredictor, Input, Path
@@ -43,6 +42,10 @@ class Predictor(BasePredictor):
             description="Height of output image. Lower if out of memory",
             default=768,
         ),
+        iterations: int = Input(
+            description="Number of times to repeat the img2img pipeline",
+            default=1,
+        ),
         image: Path = Input(
             description="Input image for img2img",
             default=None,
@@ -74,12 +77,8 @@ class Predictor(BasePredictor):
         ),
         seed: int = Input(
             description="Random seed. Leave blank to randomize the seed", default=None
-        ),
-        archive_outputs: bool = Input(
-            description="Option to archive the output images",
-            default=False,
         )
-    ) -> list[Path]:
+    ) -> Path:
         """Run a single prediction on the model"""
 
         if seed is None:
@@ -109,26 +108,48 @@ class Predictor(BasePredictor):
             "lcm_origin_steps": lcm_origin_steps,
             "output_type": "pil"
         }
-        result = pipe(**common_args, **kwargs).images
 
-        if archive_outputs:
-            archive_start_time = datetime.datetime.now()
-            print(f"Archiving images started at {archive_start_time}")
+        # Initialization of the last_image_path variable
+        last_image_path = None
 
-            tar_path = "/tmp/output_images.tar"
-            with tarfile.open(tar_path, 'w') as tar:
-                for i, sample in enumerate(result):
-                    output_path = f"/tmp/out-{i}.png"
-                    sample.save(output_path)
-                    tar.add(output_path, f"out-{i}.png")
+        # Iteratively applying img2img transformations
+        for iteration in range(iterations):
+            if last_image_path:
+                print(f"img2img iteration {iteration}")
+                input_image = Image.open(last_image_path)
+                kwargs["image"] = input_image
 
-            return Path(tar_path)
+            # Execute the model pipeline here
+            result = pipe(**common_args, **kwargs).images
 
-        # If not archiving, or there is an error in archiving, return the paths of individual images.
-        output_paths = []
-        for i, sample in enumerate(result):
-            output_path = f"/tmp/out-{i}.png"
-            sample.save(output_path)
-            output_paths.append(Path(output_path))
+            # Save the resulting image for the next iteration
+            last_image_path = f"/tmp/out-{iteration}.png"
+            result[0].save(last_image_path)
 
-        return output_paths
+        # Creating an mp4 video from the images
+        video_path = "/tmp/output_video.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(video_path, fourcc, 12.0, (width, height))
+
+        # Adding images to the video
+        for iteration in range(iterations):
+            img_path = f"/tmp/out-{iteration}.png"
+            img = cv2.imread(img_path)
+
+            if img is None:
+                print(f"Could not load image at path: {img_path}")
+                continue
+
+            # Converting color space from BGR to RGB
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # Resizing the image to match the video's dimensions
+            img_resized = cv2.resize(img_rgb, (width, height))
+            out.write(img_resized)
+
+        out.release()  # Finalize the video file
+
+        if not os.path.exists(video_path):
+            print(f"Video could not be saved at path: {video_path}")
+            return None
+
+        return Path(video_path)
