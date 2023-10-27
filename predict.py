@@ -10,17 +10,6 @@ from PIL import Image
 class Predictor(BasePredictor):
     def setup(self) -> None:
         """Load the model into memory to make running multiple predictions efficient"""
-        self.txt2img_pipe = DiffusionPipeline.from_pretrained(
-            "SimianLuo/LCM_Dreamshaper_v7",
-            custom_pipeline="latent_consistency_txt2img",
-            custom_revision="main",
-            cache_dir="model_cache",
-            safety_checker=None,
-            local_files_only=True
-        )
-
-        self.txt2img_pipe.to(torch_device="cuda", torch_dtype=torch.float16)
-
         self.img2img_pipe = DiffusionPipeline.from_pretrained(
             "SimianLuo/LCM_Dreamshaper_v7",
             custom_pipeline=".",
@@ -31,22 +20,19 @@ class Predictor(BasePredictor):
 
         self.img2img_pipe.to(torch_device="cuda", torch_dtype=torch.float16)
 
-    def cleanup(self) -> None:
-        # Remove everything in /tmp
-        for file in glob.glob("/tmp/*"):
-            os.remove(file)
-
     def extract_frames(self, video, fps, extract_all_frames):
         os.makedirs("/tmp", exist_ok=True)
 
         if not extract_all_frames:
-            command = f"ffmpeg -i {video} -vf fps={fps} /tmp/out%03d.png"
+            command = f'ffmpeg -i "{video}" -vf fps={fps} /tmp/out%03d.png'
         else:
-            command = f"ffmpeg -i {video} /tmp/out%03d.png"
+            command = f'ffmpeg -i "{video}" /tmp/out%03d.png'
 
         subprocess.run(command, shell=True, check=True)
         frame_files = sorted(os.listdir("/tmp"))
+        frame_files = [file for file in frame_files if file.endswith('.png') and 'out' in file]
 
+        print(f"Extracted {len(frame_files)} frames from video")
         return [f"/tmp/{frame_file}" for frame_file in frame_files]
 
     def width_height(self, frame_paths):
@@ -64,7 +50,6 @@ class Predictor(BasePredictor):
                 img = img.resize((width, height))
                 img.save(frame_path)
 
-
     def images_to_video(self, image_folder_path, output_video_path, fps):
         # Forming the ffmpeg command
         cmd = [
@@ -72,7 +57,7 @@ class Predictor(BasePredictor):
             '-y',  # Overwrite output file if it exists
             '-framerate', str(fps),  # Set the framerate for the input files
             '-pattern_type', 'glob',  # Enable pattern matching for filenames
-            '-i', f'{image_folder_path}/out-*.png',  # Input files pattern
+            '-i', f'{image_folder_path}/out*.png',  # Input files pattern
             '-c:v', 'libx264',  # Set the codec for video
             '-pix_fmt', 'yuv420p',  # Set the pixel format
             '-crf', '17',  # Set the constant rate factor for quality
@@ -125,7 +110,10 @@ class Predictor(BasePredictor):
         )
     ) -> Path:
         """Run a single prediction on the model"""
-        self.cleanup()
+        # Removing all temporary frames
+        tmp_frames = glob.glob("/tmp/out*.png")
+        for frame in tmp_frames:
+            os.remove(frame)
 
         if seed is None:
             seed = int.from_bytes(os.urandom(2), "big")
@@ -134,12 +122,13 @@ class Predictor(BasePredictor):
         torch.manual_seed(seed)
 
         # Extract frames from video
+        print(f"Extracting frames from video: {video}")
         frame_paths = self.extract_frames(video, fps, extract_all_frames)
 
         # Resize frames
+        print(f"Resizing frames to max width: {max_width}")
         self.resize_frames(frame_paths, max_width)
 
-        # Get width and height of frames
         width, height = self.width_height(frame_paths)
 
         img2img_args = {
@@ -155,12 +144,15 @@ class Predictor(BasePredictor):
         }
 
         # Run img2img pipeline on each frame
+        print(f"Running img2img pipeline on each frame")
         for frame_path in frame_paths:
             img2img_args["image"] = Image.open(frame_path)
             result = self.img2img_pipe(**img2img_args).images
+            print(f"Saving frame: {frame_path}")
             result[0].save(frame_path)
 
         # Create a new video from the frames
+        print(f"Creating video from frames")
         video_path = "/tmp/output_video.mp4"
         self.images_to_video("/tmp", video_path, fps)
 
