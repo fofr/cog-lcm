@@ -31,6 +31,40 @@ class Predictor(BasePredictor):
 
         self.img2img_pipe.to(torch_device="cuda", torch_dtype=torch.float16)
 
+    def cleanup(self) -> None:
+        # Remove everything in /tmp
+        for file in glob.glob("/tmp/*"):
+            os.remove(file)
+
+    def extract_frames(self, video, fps, extract_all_frames):
+        os.makedirs("/tmp", exist_ok=True)
+
+        if not extract_all_frames:
+            command = f"ffmpeg -i {video} -vf fps={fps} /tmp/out%03d.png"
+        else:
+            command = f"ffmpeg -i {video} /tmp/out%03d.png"
+
+        subprocess.run(command, shell=True, check=True)
+        frame_files = sorted(os.listdir("/tmp"))
+
+        return [f"/tmp/{frame_file}" for frame_file in frame_files]
+
+    def width_height(self, frame_paths):
+        img = Image.open(frame_paths[0])
+        width, height = img.size
+        return width, height
+
+    def resize_frames(self, frame_paths, max_width):
+        for frame_path in frame_paths:
+            img = Image.open(frame_path)
+            width, height = img.size
+            if width > max_width:
+                height = int(height * max_width / width)
+                width = max_width
+                img = img.resize((width, height))
+                img.save(frame_path)
+
+
     def images_to_video(self, image_folder_path, output_video_path, fps):
         # Forming the ffmpeg command
         cmd = [
@@ -48,67 +82,40 @@ class Predictor(BasePredictor):
         # Run the ffmpeg command
         subprocess.run(cmd)
 
-    def zoom_image(self, image: Image.Image, zoom_percentage: float) -> Image.Image:
-        """Zooms into the image by a given percentage."""
-        width, height = image.size
-        new_width = width * (1 + zoom_percentage)
-        new_height = height * (1 + zoom_percentage)
-
-        # Resize the image to the new dimensions
-        zoomed_image = image.resize((int(new_width), int(new_height)))
-
-        # Crop the image to the original dimensions, focusing on the center
-        left = (zoomed_image.width - width) / 2
-        top = (zoomed_image.height - height) / 2
-        right = (zoomed_image.width + width) / 2
-        bottom = (zoomed_image.height + height) / 2
-
-        return zoomed_image.crop((left, top, right, bottom))
-
     def predict(
         self,
-        start_prompt: str = Input(
-            description="Prompt to start with, if not using an image",
+        prompt: str = Input(
+            description="Prompt for video2video",
             default="Self-portrait oil painting, a beautiful cyborg with golden hair, 8k",
         ),
-        end_prompt: str = Input(
-            description="Prompt to animate towards",
-            default="Self-portrait watercolour, a beautiful cyborg with purple hair, 8k",
+        video: Path = Input(
+            description="Video to split into frames"
         ),
-        image: Path = Input(
-            description="Starting image if not using a prompt",
-            default=None,
+        fps: int = Input(
+            description="Number of images per second of video, when not exporting all frames",
+            default=8,
+            ge=1
         ),
-        width: int = Input(
-            description="Width of output. Lower if out of memory",
+        extract_all_frames: bool = Input(
+            description="Get every frame of the video. Ignores fps. Slow for large videos.",
+            default=False
+        ),
+        max_width: int = Input(
+            description="Maximum width of the video. Maintains aspect ratio.",
             default=512,
-        ),
-        height: int = Input(
-            description="Height of output. Lower if out of memory",
-            default=512,
-        ),
-        iterations: int = Input(
-            description="Number of times to repeat the img2img pipeline",
-            default=12,
+            ge=1
         ),
         prompt_strength: float = Input(
-            description="Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image",
+            description="1.0 corresponds to full destruction of information in video frame",
             ge=0.0,
             le=1.0,
             default=0.2,
         ),
         num_inference_steps: int = Input(
-            description="Number of denoising steps. Recommend 1 to 8 steps.",
+            description="Number of denoising steps per frame. Recommend 1 to 8 steps.",
             ge=1,
             le=50,
-            default=8,
-        ),
-        zoom_increment: int = Input(
-            description="Zoom increment percentage for each frame",
-            ge=0,
-            le=4,
-            default=0,
-
+            default=4,
         ),
         guidance_scale: float = Input(
             description="Scale for classifier-free guidance", ge=1, le=20, default=8.0
@@ -118,10 +125,7 @@ class Predictor(BasePredictor):
         )
     ) -> Path:
         """Run a single prediction on the model"""
-        # Removing all temporary frames
-        tmp_frames = glob.glob("/tmp/out-*.png")
-        for frame in tmp_frames:
-            os.remove(frame)
+        self.cleanup()
 
         if seed is None:
             seed = int.from_bytes(os.urandom(2), "big")
@@ -129,7 +133,19 @@ class Predictor(BasePredictor):
         print(f"Using seed: {seed}")
         torch.manual_seed(seed)
 
-        common_args = {
+        # Extract frames from video
+        frame_paths = self.extract_frames(video, fps, extract_all_frames)
+
+        # Resize frames
+        self.resize_frames(frame_paths, max_width)
+
+        # Get width and height of frames
+        width, height = self.width_height(frame_paths)
+
+        img2img_args = {
+            "num_inference_steps": num_inference_steps,
+            "prompt": prompt,
+            "strength": prompt_strength,
             "width": width,
             "height": height,
             "guidance_scale": guidance_scale,
@@ -138,46 +154,14 @@ class Predictor(BasePredictor):
             "output_type": "pil"
         }
 
-        img2img_args = {
-            "num_inference_steps": num_inference_steps,
-            "prompt": end_prompt,
-            "strength": prompt_strength
-        }
+        # Run img2img pipeline on each frame
+        for frame_path in frame_paths:
+            img2img_args["image"] = Image.open(frame_path)
+            result = self.img2img_pipe(**img2img_args).images
+            result[0].save(frame_path)
 
-        if image:
-            print("img2img mode")
-            img2img_args["image"] = Image.open(image)
-        else:
-            print("txt2img mode")
-            txt2img_args = {
-                "prompt": start_prompt,
-                "num_inference_steps": 8 # Always want a good starting image
-            }
-            result = self.txt2img_pipe(**common_args, **txt2img_args).images
-            img2img_args["image"] = result[0]
-
-        last_image_path = None
-
-        # Iteratively applying img2img transformations
-        for iteration in range(iterations):
-            if last_image_path:
-                print(f"img2img iteration {iteration}")
-                img2img_args["image"] = Image.open(last_image_path)
-
-                zoom_increment_mapping = {4: 0.1, 3: 0.05, 2: 0.025, 1: 0.00125}
-                if 1 <= zoom_increment <= 4:
-                    zoom_factor = zoom_increment_mapping[zoom_increment]
-                    img2img_args["image"] = self.zoom_image(img2img_args["image"], zoom_factor)
-
-            # Execute the model pipeline here
-            result = self.img2img_pipe(**common_args, **img2img_args).images
-
-            # Save the resulting image for the next iteration
-            last_image_path = f"/tmp/out-{iteration:06d}.png"
-            result[0].save(last_image_path)
-
-        # Creating an mp4 video from the images
+        # Create a new video from the frames
         video_path = "/tmp/output_video.mp4"
-        self.images_to_video("/tmp", video_path, 12)
+        self.images_to_video("/tmp", video_path, fps)
 
         return Path(video_path)
