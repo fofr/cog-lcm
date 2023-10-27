@@ -6,6 +6,7 @@ build:
   system_packages:
     - "libgl1-mesa-glx"
     - "libglib2.0-0"
+    - "ffmpeg"
   python_version: "3.11"
   python_packages:
     - "accelerate==0.23.0"
