@@ -2,6 +2,8 @@ import os
 import torch
 import subprocess
 import glob
+import tarfile
+from typing import List
 from diffusers import DiffusionPipeline
 from pipeline import LatentConsistencyModelImg2ImgPipeline
 from cog import BasePredictor, Input, Path
@@ -65,6 +67,11 @@ class Predictor(BasePredictor):
 
         return zoomed_image.crop((left, top, right, bottom))
 
+    def tar_frames(self, frame_paths, tar_path):
+        with tarfile.open(tar_path, "w:gz") as tar:
+            for frame in frame_paths:
+                tar.add(frame)
+
     def predict(
         self,
         start_prompt: str = Input(
@@ -115,8 +122,11 @@ class Predictor(BasePredictor):
         ),
         seed: int = Input(
             description="Random seed. Leave blank to randomize the seed", default=None
+        ),
+        return_frames: bool = Input(
+            description="Return a tar file with all the frames alongside the video", default=False
         )
-    ) -> Path:
+    ) -> List[Path]:
         """Run a single prediction on the model"""
         # Removing all temporary frames
         tmp_frames = glob.glob("/tmp/out-*.png")
@@ -157,6 +167,7 @@ class Predictor(BasePredictor):
             img2img_args["image"] = result[0]
 
         last_image_path = None
+        frame_paths = []
 
         # Iteratively applying img2img transformations
         for iteration in range(iterations):
@@ -175,9 +186,17 @@ class Predictor(BasePredictor):
             # Save the resulting image for the next iteration
             last_image_path = f"/tmp/out-{iteration:06d}.png"
             result[0].save(last_image_path)
+            frame_paths.append(last_image_path)
 
         # Creating an mp4 video from the images
         video_path = "/tmp/output_video.mp4"
         self.images_to_video("/tmp", video_path, 12)
 
-        return Path(video_path)
+        # Tar and return all the frames if return_frames is True
+        if return_frames:
+            print(f"Tarring and returning all frames")
+            tar_path = "/tmp/frames.tar.gz"
+            self.tar_frames(frame_paths, tar_path)
+            return [Path(video_path), Path(tar_path)]
+
+        return [Path(video_path)]
