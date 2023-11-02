@@ -24,9 +24,9 @@ class Predictor(BasePredictor):
         os.makedirs("/tmp", exist_ok=True)
 
         if not extract_all_frames:
-            command = f"ffmpeg -i {video} -vf fps={fps} /tmp/out%03d.png"
+            command = f'ffmpeg -i "{video}" -vf fps={fps} /tmp/out%03d.png'
         else:
-            command = f"ffmpeg -i {video} /tmp/out%03d.png"
+            command = f'ffmpeg -i "{video}" /tmp/out%03d.png'
 
         subprocess.run(command, shell=True, check=True)
         frame_files = sorted(os.listdir("/tmp"))
