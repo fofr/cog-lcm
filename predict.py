@@ -2,29 +2,26 @@ import os
 import torch
 import datetime
 import tarfile
-from diffusers import DiffusionPipeline
-from pipeline import LatentConsistencyModelImg2ImgPipeline
+from diffusers import DiffusionPipeline, AutoPipelineForImage2Image
 from cog import BasePredictor, Input, Path
 from PIL import Image
+
 
 class Predictor(BasePredictor):
     def setup(self) -> None:
         """Load the model into memory to make running multiple predictions efficient"""
         self.txt2img_pipe = DiffusionPipeline.from_pretrained(
             "SimianLuo/LCM_Dreamshaper_v7",
-            custom_pipeline="latent_consistency_txt2img",
-            custom_revision="main",
             cache_dir="model_cache",
-            local_files_only=True
+            local_files_only=True,
         )
 
         self.txt2img_pipe.to(torch_device="cuda", torch_dtype=torch.float16)
 
-        self.img2img_pipe = DiffusionPipeline.from_pretrained(
+        self.img2img_pipe = AutoPipelineForImage2Image.from_pretrained(
             "SimianLuo/LCM_Dreamshaper_v7",
-            custom_pipeline=".",
             cache_dir="model_cache",
-            local_files_only=True
+            local_files_only=True,
         )
 
         self.img2img_pipe.to(torch_device="cuda", torch_dtype=torch.float16)
@@ -78,7 +75,7 @@ class Predictor(BasePredictor):
         archive_outputs: bool = Input(
             description="Option to archive the output images",
             default=False,
-        )
+        ),
     ) -> list[Path]:
         """Run a single prediction on the model"""
 
@@ -107,7 +104,7 @@ class Predictor(BasePredictor):
             "num_images_per_prompt": num_images,
             "num_inference_steps": num_inference_steps,
             "lcm_origin_steps": lcm_origin_steps,
-            "output_type": "pil"
+            "output_type": "pil",
         }
         result = pipe(**common_args, **kwargs).images
 
@@ -116,7 +113,7 @@ class Predictor(BasePredictor):
             print(f"Archiving images started at {archive_start_time}")
 
             tar_path = "/tmp/output_images.tar"
-            with tarfile.open(tar_path, 'w') as tar:
+            with tarfile.open(tar_path, "w") as tar:
                 for i, sample in enumerate(result):
                     output_path = f"/tmp/out-{i}.png"
                     sample.save(output_path)
