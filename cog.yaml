@@ -14,5 +14,5 @@ build:
     - "diffusers==0.22.3"
     - "Pillow==10.1.0"
     - "transformers==4.34.1"
-    - "opencv-python==4.8.1.78"
+    - "opencv-python-headless==4.8.1.78"
 predict: "predict.py:Predictor"
