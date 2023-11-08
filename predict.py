@@ -2,6 +2,7 @@ import os
 import torch
 import datetime
 import tarfile
+from typing import List
 from diffusers import DiffusionPipeline, AutoPipelineForImage2Image
 from cog import BasePredictor, Input, Path
 from PIL import Image
@@ -76,7 +77,7 @@ class Predictor(BasePredictor):
             description="Option to archive the output images",
             default=False,
         ),
-    ) -> list[Path]:
+    ) -> List[Path]:
         """Run a single prediction on the model"""
 
         if seed is None:
