@@ -11,7 +11,7 @@ build:
     - "accelerate==0.23.0"
     - "torch==2.0.1"
     - "torchvision==0.15.2"
-    - "git+https://github.com/huggingface/diffusers.git@main#egg=diffusers"
+    - "diffusers==0.22.3"
     - "Pillow==10.1.0"
     - "transformers==4.34.1"
     - "opencv-python==4.8.1.78"
