@@ -216,7 +216,6 @@ class Predictor(BasePredictor):
             seed = int.from_bytes(os.urandom(2), "big")
 
         print(f"Using seed: {seed}")
-        torch.manual_seed(seed)
 
         prompt = prompt.strip().splitlines()
         if len(prompt) == 1:
@@ -285,7 +284,7 @@ class Predictor(BasePredictor):
             "lcm_origin_steps": lcm_origin_steps,
             "output_type": "pil",
         }
-        result = pipe(**common_args, **kwargs).images
+        result = pipe(**common_args, **kwargs, generator=torch.manual_seed(seed)).images
 
         if archive_outputs:
             archive_start_time = datetime.datetime.now()
