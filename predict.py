@@ -114,7 +114,7 @@ class Predictor(BasePredictor):
     def predict(
         self,
         prompt: str = Input(
-            description="Input prompt",
+            description="For multiple prompts, enter each on a new line.",
             default="Self-portrait oil painting, a beautiful cyborg with golden hair, 8k",
         ),
         width: int = Input(
@@ -141,7 +141,7 @@ class Predictor(BasePredictor):
             default=0.8,
         ),
         num_images: int = Input(
-            description="Number of images to output",
+            description="Number of images per prompt",
             ge=1,
             le=50,
             default=1,
@@ -208,6 +208,19 @@ class Predictor(BasePredictor):
 
         print(f"Using seed: {seed}")
         torch.manual_seed(seed)
+
+        prompt = prompt.strip().splitlines()
+        if len(prompt) == 1:
+            print("Found 1 prompt:")
+        else:
+            print(f"Found {len(prompt)} prompts:")
+        for p in prompt:
+            print(f"- {p}")
+
+        if len(prompt) * num_images == 1:
+            print("Making 1 image")
+        else:
+            print(f"Making {len(prompt) * num_images} images")
 
         if image or control_image:
             (
