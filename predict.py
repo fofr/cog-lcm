@@ -53,6 +53,15 @@ class Predictor(BasePredictor):
 
         self.controlnet_pipe.to(torch_device=torch_device, torch_dtype=torch_dtype)
 
+        # warm the pipes
+        self.txt2img_pipe(prompt="warmup")
+        self.img2img_pipe(prompt="warmup", image=[Image.new("RGB", (768, 768))])
+        self.controlnet_pipe(
+            prompt="warmup",
+            image=[Image.new("RGB", (768, 768))],
+            control_image=[Image.new("RGB", (768, 768))],
+        )
+
     def control_image(self, image, canny_low_threshold, canny_high_threshold):
         image = np.array(image)
         canny = cv.Canny(image, canny_low_threshold, canny_high_threshold)
