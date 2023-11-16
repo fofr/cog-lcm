@@ -294,12 +294,12 @@ class Predictor(BasePredictor):
         # If not archiving, or there is an error in archiving, return the paths of individual images.
         output_paths = []
         for i, sample in enumerate(result):
-            output_path = f"/tmp/out-{i}.png"
+            output_path = f"/tmp/out-{i}.jpg"
             sample.save(output_path)
             output_paths.append(Path(output_path))
 
         if canny_image:
-            canny_image_path = "/tmp/canny-image.png"
+            canny_image_path = "/tmp/canny-image.jpg"
             canny_image.save(canny_image_path)
             output_paths.append(Path(canny_image_path))
 
