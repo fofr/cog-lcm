@@ -4,7 +4,7 @@ import torch
 import datetime
 import tarfile
 import numpy as np
-from typing import List
+from typing import List, Optional
 from diffusers import ControlNetModel, DiffusionPipeline, AutoPipelineForImage2Image
 from latent_consistency_controlnet import LatentConsistencyModelPipeline_controlnet
 from cog import BasePredictor, Input, Path
@@ -12,51 +12,68 @@ from PIL import Image
 
 
 class Predictor(BasePredictor):
+    def create_pipeline(
+        self,
+        pipeline_class,
+        safety_checker: bool = True,
+        controlnet: Optional[ControlNetModel] = None,
+    ):
+        kwargs = {
+            "cache_dir": "model_cache",
+            "local_files_only": True,
+        }
+
+        if not safety_checker:
+            kwargs["safety_checker"] = None
+
+        if controlnet:
+            kwargs["controlnet"] = controlnet
+            kwargs["scheduler"] = None
+
+        pipe = pipeline_class.from_pretrained("SimianLuo/LCM_Dreamshaper_v7", **kwargs)
+        pipe.to(torch_device="cuda", torch_dtype=torch.float16)
+        return pipe
+
     def setup(self) -> None:
         """Load the model into memory to make running multiple predictions efficient"""
-        torch_device = "cuda"
-        torch_dtype = torch.float16
 
-        self.txt2img_pipe = DiffusionPipeline.from_pretrained(
-            "SimianLuo/LCM_Dreamshaper_v7",
-            cache_dir="model_cache",
-            local_files_only=True,
+        self.txt2img_pipe = self.create_pipeline(DiffusionPipeline)
+        self.txt2img_pipe_unsafe = self.create_pipeline(
+            DiffusionPipeline, safety_checker=False
         )
 
-        self.txt2img_pipe.to(torch_device=torch_device, torch_dtype=torch_dtype)
-
-        self.img2img_pipe = AutoPipelineForImage2Image.from_pretrained(
-            "SimianLuo/LCM_Dreamshaper_v7",
-            cache_dir="model_cache",
-            local_files_only=True,
+        self.img2img_pipe = self.create_pipeline(AutoPipelineForImage2Image)
+        self.img2img_pipe_unsafe = self.create_pipeline(
+            AutoPipelineForImage2Image, safety_checker=False
         )
-
-        self.img2img_pipe.to(torch_device=torch_device, torch_dtype=torch_dtype)
 
         controlnet_canny = ControlNetModel.from_pretrained(
             "lllyasviel/control_v11p_sd15_canny",
             cache_dir="model_cache",
             local_files_only=True,
-            torch_dtype=torch_dtype,
-        ).to(torch_device)
+            torch_dtype=torch.float16,
+        ).to("cuda")
 
-        self.controlnet_pipe = (
-            LatentConsistencyModelPipeline_controlnet.from_pretrained(
-                "SimianLuo/LCM_Dreamshaper_v7",
-                cache_dir="model_cache",
-                local_files_only=True,
-                safety_checker=None,
-                controlnet=controlnet_canny,
-                scheduler=None,
-            )
+        self.controlnet_pipe = self.create_pipeline(
+            LatentConsistencyModelPipeline_controlnet, controlnet=controlnet_canny
         )
-
-        self.controlnet_pipe.to(torch_device=torch_device, torch_dtype=torch_dtype)
+        self.controlnet_pipe_unsafe = self.create_pipeline(
+            LatentConsistencyModelPipeline_controlnet,
+            safety_checker=False,
+            controlnet=controlnet_canny,
+        )
 
         # warm the pipes
         self.txt2img_pipe(prompt="warmup")
+        self.txt2img_pipe_unsafe(prompt="warmup")
         self.img2img_pipe(prompt="warmup", image=[Image.new("RGB", (768, 768))])
+        self.img2img_pipe_unsafe(prompt="warmup", image=[Image.new("RGB", (768, 768))])
         self.controlnet_pipe(
+            prompt="warmup",
+            image=[Image.new("RGB", (768, 768))],
+            control_image=[Image.new("RGB", (768, 768))],
+        )
+        self.controlnet_pipe_unsafe(
             prompt="warmup",
             image=[Image.new("RGB", (768, 768))],
             control_image=[Image.new("RGB", (768, 768))],
@@ -209,6 +226,10 @@ class Predictor(BasePredictor):
             description="Option to archive the output images",
             default=False,
         ),
+        disable_safety_checker: bool = Input(
+            description="Disable safety checker for generated images. This feature is only available through the API",
+            default=False,
+        ),
     ) -> List[Path]:
         """Run a single prediction on the model"""
 
@@ -264,15 +285,9 @@ class Predictor(BasePredictor):
 
             kwargs["control_image"] = canny_image
 
-        if control_image:
-            print("controlnet mode")
-            pipe = self.controlnet_pipe
-        elif image:
-            print("img2img mode")
-            pipe = self.img2img_pipe
-        else:
-            print("txt2img mode")
-            pipe = self.txt2img_pipe
+        mode = "controlnet" if control_image else "img2img" if image else "txt2img"
+        print(f"{mode} mode")
+        pipe = getattr(self, f"{mode}_pipe" if not disable_safety_checker else f"{mode}_pipe_unsafe")
 
         common_args = {
             "width": width,
