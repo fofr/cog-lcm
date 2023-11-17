@@ -4,11 +4,23 @@ import torch
 import datetime
 import tarfile
 import numpy as np
+import time
+import subprocess
 from typing import List, Optional
 from diffusers import ControlNetModel, DiffusionPipeline, AutoPipelineForImage2Image
 from latent_consistency_controlnet import LatentConsistencyModelPipeline_controlnet
 from cog import BasePredictor, Input, Path
 from PIL import Image
+
+MODEL_CACHE_URL = "https://weights.replicate.delivery/default/fofr-lcm/model_cache.tar"
+MODEL_CACHE = "model_cache"
+
+def download_weights(url, dest):
+    start = time.time()
+    print("downloading url: ", url)
+    print("downloading to: ", dest)
+    subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
+    print("downloading took: ", time.time() - start)
 
 
 class Predictor(BasePredictor):
@@ -19,7 +31,7 @@ class Predictor(BasePredictor):
         controlnet: Optional[ControlNetModel] = None,
     ):
         kwargs = {
-            "cache_dir": "model_cache",
+            "cache_dir": MODEL_CACHE,
             "local_files_only": True,
         }
 
@@ -36,6 +48,9 @@ class Predictor(BasePredictor):
 
     def setup(self) -> None:
         """Load the model into memory to make running multiple predictions efficient"""
+
+        if not os.path.exists(MODEL_CACHE):
+            download_weights(MODEL_CACHE_URL, MODEL_CACHE)
 
         self.txt2img_pipe = self.create_pipeline(DiffusionPipeline)
         self.txt2img_pipe_unsafe = self.create_pipeline(
@@ -137,6 +152,7 @@ class Predictor(BasePredictor):
         image, control_image = self.resize_images([image, control_image], width, height)
         return width, height, control_image, image
 
+    @torch.inference_mode()
     def predict(
         self,
         prompt: str = Input(
@@ -287,7 +303,10 @@ class Predictor(BasePredictor):
 
         mode = "controlnet" if control_image else "img2img" if image else "txt2img"
         print(f"{mode} mode")
-        pipe = getattr(self, f"{mode}_pipe" if not disable_safety_checker else f"{mode}_pipe_unsafe")
+        pipe = getattr(
+            self,
+            f"{mode}_pipe" if not disable_safety_checker else f"{mode}_pipe_unsafe",
+        )
 
         common_args = {
             "width": width,
@@ -299,7 +318,13 @@ class Predictor(BasePredictor):
             "lcm_origin_steps": lcm_origin_steps,
             "output_type": "pil",
         }
-        result = pipe(**common_args, **kwargs, generator=torch.manual_seed(seed)).images
+
+        with torch.autocast("cuda"):
+            result = pipe(
+                **common_args,
+                **kwargs,
+                generator=torch.Generator("cuda").manual_seed(seed),
+            ).images
 
         if archive_outputs:
             archive_start_time = datetime.datetime.now()
