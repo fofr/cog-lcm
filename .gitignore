@@ -1,0 +1,8 @@
+model_cache/
+__pycache__
+*.png
+*.jpg
+cog_class_data/
+cog_instance_data/
+model_cache.tar
+tmp/
