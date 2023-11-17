@@ -14,6 +14,7 @@ build:
     - "diffusers==0.22.3"
     - "Pillow==10.1.0"
     - "transformers==4.34.1"
+    - "xformers==0.0.22"
     - "opencv-python-headless==4.8.1.78"
   run:
     - curl -o /usr/local/bin/pget -L "https://github.com/replicate/pget/releases/download/v0.0.6/pget" && chmod +x /usr/local/bin/pget

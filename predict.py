@@ -44,6 +44,7 @@ class Predictor(BasePredictor):
 
         pipe = pipeline_class.from_pretrained("SimianLuo/LCM_Dreamshaper_v7", **kwargs)
         pipe.to(torch_device="cuda", torch_dtype=torch.float16)
+        pipe.enable_xformers_memory_efficient_attention()
         return pipe
 
     def setup(self) -> None:
@@ -248,6 +249,7 @@ class Predictor(BasePredictor):
         ),
     ) -> List[Path]:
         """Run a single prediction on the model"""
+        prediction_start = time.time()
 
         if seed is None:
             seed = int.from_bytes(os.urandom(2), "big")
@@ -319,14 +321,16 @@ class Predictor(BasePredictor):
             "output_type": "pil",
         }
 
-        with torch.autocast("cuda"):
-            result = pipe(
-                **common_args,
-                **kwargs,
-                generator=torch.Generator("cuda").manual_seed(seed),
-            ).images
+        start = time.time()
+        result = pipe(
+            **common_args,
+            **kwargs,
+            generator=torch.Generator("cuda").manual_seed(seed),
+        ).images
+        print(f"Inference took: {time.time() - start:.2f}s")
 
         if archive_outputs:
+            start = time.time()
             archive_start_time = datetime.datetime.now()
             print(f"Archiving images started at {archive_start_time}")
 
@@ -337,6 +341,7 @@ class Predictor(BasePredictor):
                     sample.save(output_path)
                     tar.add(output_path, f"out-{i}.png")
 
+            print(f"Archiving took: {time.time() - start:.2f}s")
             return Path(tar_path)
 
         # If not archiving, or there is an error in archiving, return the paths of individual images.
@@ -351,4 +356,5 @@ class Predictor(BasePredictor):
             canny_image.save(canny_image_path)
             output_paths.append(Path(canny_image_path))
 
+        print(f"Prediction took: {time.time() - prediction_start:.2f}s")
         return output_paths
