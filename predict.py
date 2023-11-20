@@ -6,7 +6,9 @@ import tarfile
 import numpy as np
 import time
 import subprocess
-from typing import List, Optional
+import base64
+from io import BytesIO
+from typing import List, Optional, Iterator
 from diffusers import ControlNetModel, DiffusionPipeline, AutoPipelineForImage2Image
 from latent_consistency_controlnet import LatentConsistencyModelPipeline_controlnet
 from cog import BasePredictor, Input, Path
@@ -247,7 +249,7 @@ class Predictor(BasePredictor):
             description="Disable safety checker for generated images. This feature is only available through the API",
             default=False,
         ),
-    ) -> List[Path]:
+    ) -> List[str]:
         """Run a single prediction on the model"""
         prediction_start = time.time()
 
@@ -329,32 +331,33 @@ class Predictor(BasePredictor):
         ).images
         print(f"Inference took: {time.time() - start:.2f}s")
 
-        if archive_outputs:
-            start = time.time()
-            archive_start_time = datetime.datetime.now()
-            print(f"Archiving images started at {archive_start_time}")
+        # if archive_outputs:
+        #     start = time.time()
+        #     archive_start_time = datetime.datetime.now()
+        #     print(f"Archiving images started at {archive_start_time}")
 
-            tar_path = "/tmp/output_images.tar"
-            with tarfile.open(tar_path, "w") as tar:
-                for i, sample in enumerate(result):
-                    output_path = f"/tmp/out-{i}.png"
-                    sample.save(output_path)
-                    tar.add(output_path, f"out-{i}.png")
+        #     tar_path = "/tmp/output_images.tar"
+        #     with tarfile.open(tar_path, "w") as tar:
+        #         for i, sample in enumerate(result):
+        #             output_path = f"/tmp/out-{i}.png"
+        #             sample.save(output_path)
+        #             tar.add(output_path, f"out-{i}.png")
 
-            print(f"Archiving took: {time.time() - start:.2f}s")
-            return Path(tar_path)
+        #     print(f"Archiving took: {time.time() - start:.2f}s")
+        #     return Path(tar_path)
 
         # If not archiving, or there is an error in archiving, return the paths of individual images.
         output_paths = []
         for i, sample in enumerate(result):
-            output_path = f"/tmp/out-{i}.jpg"
-            sample.save(output_path)
-            output_paths.append(Path(output_path))
+            buffered = BytesIO()
+            sample.save(buffered, format="JPEG")
+            img_str = base64.b64encode(buffered.getvalue())
+            output_paths.append(img_str)
 
-        if canny_image:
-            canny_image_path = "/tmp/canny-image.jpg"
-            canny_image.save(canny_image_path)
-            output_paths.append(Path(canny_image_path))
+        # if canny_image:
+        #     canny_image_path = "/tmp/canny-image.jpg"
+        #     canny_image.save(canny_image_path)
+        #     output_paths.append(Path(canny_image_path))
 
         print(f"Prediction took: {time.time() - prediction_start:.2f}s")
         return output_paths
