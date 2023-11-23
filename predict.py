@@ -15,6 +15,7 @@ from PIL import Image
 MODEL_CACHE_URL = "https://weights.replicate.delivery/default/fofr-lcm/model_cache.tar"
 MODEL_CACHE = "model_cache"
 
+
 def download_weights(url, dest):
     start = time.time()
     print("downloading url: ", url)
@@ -140,6 +141,12 @@ class Predictor(BasePredictor):
     ):
         image = self.open_image(image)
         control_image = self.open_image(control_image)
+
+        if image and image.mode == "RGBA":
+            image = image.convert("RGB")
+
+        if control_image and control_image.mode == "RGBA":
+            control_image = control_image.convert("RGB")
 
         if sizing_strategy == "input_image":
             print("Resizing based on input image")
@@ -305,6 +312,7 @@ class Predictor(BasePredictor):
 
         mode = "controlnet" if control_image else "img2img" if image else "txt2img"
         print(f"{mode} mode")
+
         pipe = getattr(
             self,
             f"{mode}_pipe" if not disable_safety_checker else f"{mode}_pipe_unsafe",
