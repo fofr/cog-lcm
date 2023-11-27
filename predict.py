@@ -101,6 +101,19 @@ class Predictor(BasePredictor):
         canny = cv.Canny(image, canny_low_threshold, canny_high_threshold)
         return Image.fromarray(canny)
 
+    def get_dimensions(self, image):
+        original_width, original_height = image.size
+        print(
+            f"Original dimensions: Width: {original_width}, Height: {original_height}"
+        )
+        resized_width, resized_height = self.get_resized_dimensions(
+            original_width, original_height
+        )
+        print(
+            f"Dimensions to resize to: Width: {resized_width}, Height: {resized_height}"
+        )
+        return resized_width, resized_height
+
     def get_allowed_dimensions(self, base=512, max_dim=1024):
         """
         Function to generate allowed dimensions optimized around a base up to a max
