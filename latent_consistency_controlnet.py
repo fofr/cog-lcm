@@ -510,6 +510,7 @@ class LatentConsistencyModelPipeline_controlnet(DiffusionPipeline):
             prompt_embeds.dtype,
             device,
             latents,
+            generator,
         )
         bs = batch_size * num_images_per_prompt
 
